@@ -4,7 +4,7 @@ import numpy as np
 import random
 import time
 import math
-from ultralytics import YOLO
+# from ultralytics import YOLO
 
 # Khởi tạo MediaPipe cho nhận diện bàn tay, cơ thể và khuôn mặt
 mp_hands = mp.solutions.hands
@@ -12,7 +12,7 @@ mp_pose = mp.solutions.pose
 mp_face = mp.solutions.face_mesh
 mp_drawing = mp.solutions.drawing_utils
 
-model = YOLO("ppe.pt")
+# model = YOLO("ppe.pt")
 
 
 # Hàm tạo hình ảnh chữ "C" với hướng và kích thước cụ thể
