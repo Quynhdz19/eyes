@@ -1,13 +1,18 @@
-from flask import Flask, render_template, Response, Flask
-import smtplib
-from email.mime.text import MIMEText
+from flask import Flask, render_template, Response, Flask, jsonify
 import cv2
 import mediapipe as mp
 import numpy as np
 import random
 import math
+from ultralytics import YOLO  # Thư viện YOLOv8
+
+
 
 app = Flask(__name__)
+
+
+model = YOLO("yolov8n.pt")  # YOLOv8 nhận diện người
+
 
 # Khởi tạo MediaPipe
 mp_hands = mp.solutions.hands
@@ -15,6 +20,8 @@ mp_pose = mp.solutions.pose
 mp_face = mp.solutions.face_mesh
 mp_drawing = mp.solutions.drawing_utils
 
+MIN_FACE_DISTANCE = 50   # Cận (pixels)
+MAX_FACE_DISTANCE = 250  # Xa (pixels)
 
 # Hàm tính toán hướng chỉ tay
 def calculate_hand_direction(wrist, index_finger_tip):
@@ -118,38 +125,258 @@ def generate_frames():
 
     cap.release()
 
+
+
+
+# **Khởi tạo MediaPipe Pose**
+mp_pose = mp.solutions.pose
+mp_drawing = mp.solutions.drawing_utils
+MAX_SPINE_ANGLE = 70  # Nếu > 15° → ngồi sai tư thế
+
+# **Biến toàn cục để lưu trạng thái tư thế**
+posture_data = {"status": "Đang phân tích...", "spine_angle": "--", "confidence": "--"}
+
+def detect_posture(frame):
+    """Nhận diện tư thế ngồi bằng MediaPipe Pose và OpenCV"""
+    height, width, _ = frame.shape
+    global posture_data
+
+    with mp_pose.Pose(min_detection_confidence=0.8, min_tracking_confidence=0.8) as pose:
+        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        pose_results = pose.process(image_rgb)
+
+        # **Nếu MediaPipe không tìm thấy người, thử sử dụng OpenPose hoặc YOLO**
+        if not pose_results.pose_landmarks:
+            print("⚠️ Không tìm thấy người bằng MediaPipe! Đang sử dụng OpenCV DNN...")
+            frame = detect_body_with_opencv(frame)
+            return frame
+
+        # **Vẽ khung nhận diện**
+        mp_drawing.draw_landmarks(frame, pose_results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+        landmarks = pose_results.pose_landmarks.landmark
+
+        def get_point(landmark):
+            """Lấy tọa độ (x, y) từ keypoint nếu nhìn thấy rõ"""
+            if landmark.visibility > 0.5:
+                return int(landmark.x * width), int(landmark.y * height)
+            return None
+
+        # **Lấy các điểm quan trọng trên cơ thể**
+        left_shoulder = get_point(landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER])
+        right_shoulder = get_point(landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER])
+        left_hip = get_point(landmarks[mp_pose.PoseLandmark.LEFT_HIP])
+        right_hip = get_point(landmarks[mp_pose.PoseLandmark.RIGHT_HIP])
+
+        mid_shoulder = ((left_shoulder[0] + right_shoulder[0]) // 2,
+                        (left_shoulder[1] + right_shoulder[1]) // 2) if left_shoulder and right_shoulder else None
+        mid_hip = ((left_hip[0] + right_hip[0]) // 2,
+                   (left_hip[1] + right_hip[1]) // 2) if left_hip and right_hip else None
+
+        # **Tính góc nghiêng xương sống**
+        if mid_shoulder and mid_hip and left_hip:
+            a, b, c = np.array(mid_shoulder), np.array(mid_hip), np.array(left_hip)
+            ba, bc = a - b, c - b
+            cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
+            spine_angle = np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0)))
+
+            # **Dự báo tư thế ngồi**
+            if spine_angle < MAX_SPINE_ANGLE:
+                status_text = "✅ Ngồi Đúng"
+                color = (0, 255, 0)  # Xanh: ngồi đúng
+            else:
+                status_text = "⚠️ Ngồi Sai!"
+                color = (0, 0, 255)  # Đỏ: ngồi sai
+
+            # **Vẽ đường nối quan trọng**
+            def draw_line(a, b, color):
+                if a and b:
+                    cv2.line(frame, a, b, color, 3)
+
+            draw_line(mid_shoulder, mid_hip, (255, 0, 0))  # Cổ → Hông
+            draw_line(left_shoulder, right_shoulder, (0, 255, 255))  # Vai
+            draw_line(left_hip, right_hip, (0, 255, 255))  # Hông
+
+            print(f"📡 Gửi dữ liệu: {status_text}, Góc: {round(spine_angle, 2)}°")
+
+            # **Lưu dữ liệu tư thế**
+            posture_data = {
+                "status": status_text,
+                "spine_angle": round(spine_angle, 2),
+                "confidence": 100  # MediaPipe không có confidence
+            }
+
+    return frame
+
+def detect_body_with_opencv(frame):
+    """Nhận diện người bằng OpenCV DNN khi MediaPipe không hoạt động"""
+    net = cv2.dnn.readNetFromCaffe(
+        "models/deploy.prototxt",
+        "models/res10_300x300_ssd_iter_140000.caffemodel"
+    )
+
+    blob = cv2.dnn.blobFromImage(frame, scalefactor=1.0, size=(300, 300), mean=(104.0, 177.0, 123.0))
+    net.setInput(blob)
+    detections = net.forward()
+
+    for i in range(detections.shape[2]):
+        confidence = detections[0, 0, i, 2]
+        if confidence > 0.6:  # Chỉ lấy những phát hiện có độ tin cậy cao
+            box = detections[0, 0, i, 3:7] * np.array([frame.shape[1], frame.shape[0], frame.shape[1], frame.shape[0]])
+            (startX, startY, endX, endY) = box.astype("int")
+
+            # Vẽ khung nhận diện
+            cv2.rectangle(frame, (startX, startY), (endX, endY), (0, 255, 0), 2)
+            cv2.putText(frame, f"Confidence: {round(confidence * 100, 1)}%", (startX, startY - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+    return frame
+
+
+
+def generate_frames_index():
+    """Luồng video phát hiện tư thế"""
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("Không thể mở camera!")
+        return
+
+    while True:
+        success, frame = cap.read()
+        if not success:
+            break
+
+        frame = cv2.flip(frame, 1)
+        frame = detect_posture(frame)
+
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame = buffer.tobytes()
+        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
+    cap.release()
+
+
+
+
+# nhận diện lớp học
+def calculate_angle(a, b, c):
+    """Tính góc giữa 3 điểm (b là điểm giữa)"""
+    if any(p is None for p in [a, b, c]):
+        return None
+    a, b, c = np.array(a), np.array(b), np.array(c)
+    ba, bc = a - b, c - b
+    cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
+    return np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0)))
+
+def process_video(video_path):
+    """Xử lý video để nhận diện tư thế"""
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print("Không thể mở video!")
+        return None
+
+    with mp_pose.Pose(min_detection_confidence=0.7, min_tracking_confidence=0.7) as pose:
+        while cap.isOpened():
+            success, frame = cap.read()
+            if not success:
+                break
+
+            frame = cv2.flip(frame, 1)
+            height, width, _ = frame.shape
+
+            # Nhận diện người bằng YOLO
+            results = model(frame)
+
+            for result in results:
+                for box in result.boxes:
+                    x1, y1, x2, y2 = map(int, box.xyxy[0])
+                    confidence = box.conf[0]
+
+                    # Crop phần người để nhận diện tư thế
+                    person_img = frame[y1:y2, x1:x2]
+
+                    # Nhận diện tư thế bằng MediaPipe Pose
+                    image_rgb = cv2.cvtColor(person_img, cv2.COLOR_BGR2RGB)
+                    pose_results = pose.process(image_rgb)
+
+                    if pose_results.pose_landmarks:
+                        mp_drawing.draw_landmarks(frame, pose_results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+                        landmarks = pose_results.pose_landmarks.landmark
+
+                        def get_point(landmark):
+                            if landmark.visibility > 0.5:
+                                return int(landmark.x * (x2 - x1)) + x1, int(landmark.y * (y2 - y1)) + y1
+                            return None
+
+                        left_shoulder = get_point(landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER])
+                        right_shoulder = get_point(landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER])
+                        left_hip = get_point(landmarks[mp_pose.PoseLandmark.LEFT_HIP])
+                        right_hip = get_point(landmarks[mp_pose.PoseLandmark.RIGHT_HIP])
+
+                        mid_shoulder = ((left_shoulder[0] + right_shoulder[0]) // 2,
+                                        (left_shoulder[1] + right_shoulder[1]) // 2) if left_shoulder and right_shoulder else None
+                        mid_hip = ((left_hip[0] + right_hip[0]) // 2,
+                                   (left_hip[1] + right_hip[1]) // 2) if left_hip and right_hip else None
+
+                        # Tính góc cột sống
+                        if mid_shoulder and mid_hip and left_hip:
+                            spine_angle = calculate_angle(mid_shoulder, mid_hip, left_hip)
+
+                            # Đánh giá tư thế
+                            status_text = "✅ Đúng" if spine_angle < MAX_SPINE_ANGLE else "❌ Sai"
+                            color = (0, 255, 0) if spine_angle < MAX_SPINE_ANGLE else (0, 0, 255)
+
+                            cv2.putText(frame, f"{status_text} - {round(spine_angle, 2)}°",
+                                        (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+
+            _, buffer = cv2.imencode('.jpg', frame)
+            frame = buffer.tobytes()
+
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
+    cap.release()
+
+# Chạy kiểm tra tư thế
+
+
 # Route xử lý gửi email
-@app.route('/send-warning', methods=['POST'])
-def send_warning():
-    try:
-        # Thông tin email
-        sender_email = "bkstarstudy@gmail.com"
-        sender_password = "yipwdmjnoffovpbb"
-        receiver_email = "20020339@vnu.edu.vn"
-
-        # Nội dung email
-        subject = "Cảnh báo: Ngồi sai tư thế"
-        body = "Bạn đã ngồi sai tư thế hơn 1 giờ trong ngày. Vui lòng điều chỉnh tư thế để bảo vệ sức khỏe!"
-
-        # Tạo email
-        msg = MIMEText(body)
-        msg['Subject'] = subject
-        msg['From'] = sender_email
-        msg['To'] = receiver_email
-
-        # Gửi email
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(sender_email, sender_password)
-            server.sendmail(sender_email, receiver_email, msg.as_string())
-
-        return "Email cảnh báo đã được gửi.", 200
-    except Exception as e:
-        print(e)
-        return "Lỗi khi gửi email.", 500
+# @app.route('/send-warning', methods=['POST'])
+# def send_warning():
+#     try:
+#         # Thông tin email
+#         # sender_email = "bkstarstudy@gmail.com"
+#         # sender_password = "yipwdmjnoffovpbb"
+#         # receiver_email = "20020339@vnu.edu.vn"
+#
+#         # Nội dung email
+#         # subject = "Cảnh báo: Ngồi sai tư thế"
+#         # body = "Bạn đã ngồi sai tư thế hơn 1 giờ trong ngày. Vui lòng điều chỉnh tư thế để bảo vệ sức khỏe!"
+#         #
+#         # # Tạo email
+#         # msg = MIMEText(body)
+#         # msg['Subject'] = subject
+#         # msg['From'] = sender_email
+#         # msg['To'] = receiver_email
+#         #
+#         # # Gửi email
+#         # with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+#         #     server.login(sender_email, sender_password)
+#         #     server.sendmail(sender_email, receiver_email, msg.as_string())
+#         #
+#         # return "Email cảnh báo đã được gửi.", 200
+#     except Exception as e:
+#         print(e)
+#         return "Lỗi khi gửi email.", 500
 
 @app.route('/')
 def index():
     return render_template('home.html')
+
+@app.route("/posture_data")
+def get_posture_status():
+    """API trả về trạng thái tư thế"""
+    return jsonify(posture_data)
 
 @app.route('/predict')
 def predic():
@@ -159,6 +386,37 @@ def predic():
 def news():
     return render_template('new.html')
 
+@app.route('/video_class_feed')
+def video_class_feed():
+    def generate():
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            print("Không thể mở camera!")
+            return
+
+        while True:
+            success, frame = cap.read()
+            if not success:
+                break
+
+            frame = cv2.flip(frame, 1)
+            frame = calculate_angle(frame)
+
+            _, buffer = cv2.imencode('.jpg', frame)
+            frame = buffer.tobytes()
+            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
+        cap.release()
+
+    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/class_feed')
+def video_class():
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/class_predict')
+def class_index():
+    return render_template('class.html')
 @app.route('/video_feed')
 def video_feed():
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')

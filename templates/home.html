@@ -3,296 +3,153 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Phần mềm cảnh báo ngồi sai tư thế</title>
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
-    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-firestore.js"></script>
+    <title>Phần mềm cảnh báo tư thế</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <style>
         body {
-            background-size: cover;
-            background-position: center;
-            font-family: 'Arial', sans-serif;
+            background: #1E1E2E;
             color: #fff;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            margin: 0;
-            padding: 20px;
-            box-sizing: border-box;
+            font-family: 'Arial', sans-serif;
             text-align: center;
+            padding: 20px;
         }
-
         .container {
-
-            padding: 40px;
+            max-width: 1000px;
+            margin: auto;
+            padding: 30px;
+            background: #2A2D3E;
             border-radius: 15px;
             box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
-            max-width: 1200px;
-            width: 100%;
         }
-
         h1 {
-            color: #ff5722;
-            font-size: 2.5rem;
-            margin-bottom: 30px;
-            border-bottom: 2px solid #ff5722;
+            color: #FF9800;
+            font-size: 2rem;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #FF9800;
             padding-bottom: 10px;
         }
-
         .menu {
             display: flex;
             justify-content: center;
             gap: 20px;
+            margin-bottom: 30px;
+        }
+        .menu-item {
+            background: #424769;
+            border-radius: 10px;
+            padding: 15px;
+            width: 180px;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+        .menu-item:hover {
+            background: #FF9800;
+            color: #000;
+        }
+        .video-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             margin-top: 20px;
         }
-
-        .menu-item {
-            width: 250px;
-            height: 150px;
-            background-color: rgba(255, 255, 255, 0.1);
-            border-radius: 15px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-            cursor: pointer;
-            transition: transform 0.3s ease, background-color 0.3s ease;
+        .video-box {
+            flex: 2;
         }
-
-        .menu-item:hover {
-            transform: scale(1.1);
-            background-color: rgba(255, 87, 34, 0.9);
+        .status-box {
+            flex: 1;
+            padding: 15px;
+            background: #424769;
+            text-align: left;
         }
-
-        .menu-item img {
-            width: 100px;
-            height: 80px;
-            margin-bottom: 10px;
-            border-radius: 10px;
-        }
-
-        .menu-item a {
-            color: #000;
-            text-decoration: none;
-            font-size: 24px;
-            font-weight: bold;
-            text-align: center;
-        }
-
-        .menu-item a:hover {
-            text-decoration: none;
-        }
-
         canvas {
-            margin-top: 30px;
+            margin-top: 20px;
         }
     </style>
 </head>
 <body>
-
 <div class="container">
-    <h1>Phần mềm cảnh báo ngồi sai tư thế</h1>
+    <h1>Phần mềm cảnh báo tư thế</h1>
 
-    <!-- Menu -->
     <div class="menu">
-        <!-- Menu Test Thị Lực -->
-        <div class="menu-item">
-            <img src="static/anh1.png" alt="Test thị lực">
-            <a href="/predict">Test thị lực</a>
+<!--        <div class="menu-item"><a href="/class_predict" class="text-white">Check tư thế lớp học</a></div>-->
+        <div class="menu-item"><a href="/predict" class="text-white">Test thị lực</a></div>
+        <div class="menu-item"><a href="/news" class="text-white">Trang tin</a></div>
+    </div>
+
+    <div class="video-container">
+        <!-- Luồng Video -->
+        <div class="video-box">
+            <img style="width: 100%" src="{{ url_for('video_feed_index') }}" alt="Video feed" />
         </div>
 
-
-        <div class="menu-item">
-            <img src="static/support.png" alt="Liên hệ tư vấn">
-            <a href="/news">Trang tin</a>
+        <!-- Bảng Thông Tin -->
+        <div class="status-box" style="height: 343px">
+            <h5>Trạng thái tư thế</h5>
+            <p><strong>Tư thế:</strong> <span id="posture-status">Đang phân tích...</span></p>
+            <p><strong>Góc nghiêng:</strong> <span id="spine-angle">--</span>°</p>
+            <p><strong>Confidence:</strong> <span id="confidence-level">--%</span></p>
         </div>
     </div>
 
-    <!-- Biểu đồ thống kê -->
+    <!-- Biểu Đồ -->
     <canvas id="postureChart" width="800" height="400"></canvas>
-    <canvas id="timeChart" width="800" height="400"></canvas> <!-- Biểu đồ cột -->
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-    // Firebase Realtime Database thông tin
-    const FIREBASE_HOST = "qrcode-9e804-default-rtdb.firebaseio.com";
-    const FIREBASE_AUTH = "YRhej2dUHdfbtyAEGZEAzetJDlCZcaygdiFoo8xV";
+   let correctTime = 0;  // Tổng thời gian ngồi đúng (giây)
+let incorrectTime = 0;  // Tổng thời gian ngồi sai (giây)
 
-    // Dữ liệu thống kê thời gian
-    let correctTime = 0; // Tổng thời gian ngồi đúng (giây)
-    let incorrectTime = 0; // Tổng thời gian ngồi sai (giây)
-    let correctCount = 0; // Số lần đúng trong 30 giây
-    let incorrectCount = 0; // Số lần sai trong 30 giây
-
-    let labels = []; // Lưu trữ thời gian
-    let correctCounts = []; // Lịch sử số lần ngồi đúng
-    let incorrectCounts = []; // Lịch sử số lần ngồi sai
-
-    // Biểu đồ đường (line chart)
-    const ctxLine = document.getElementById('postureChart').getContext('2d');
-    const postureLineChart = new Chart(ctxLine, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [
-                {
-                    label: 'Tư thế đúng',
-                    data: correctCounts,
-                    borderColor: 'rgba(75, 192, 192, 1)',
-                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                    borderWidth: 2,
-                    tension: 0.3,
-                },
-                {
-                    label: 'Tư thế sai ',
-                    data: incorrectCounts,
-                    borderColor: 'rgba(255, 99, 132, 1)',
-                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
-                    borderWidth: 2,
-                    tension: 0.3,
-                }
-            ],
-        },
-        options: {
-            responsive: true,
-            scales: {
-                x: {
-                    title: {
-                        display: true,
-                        text: 'Thời gian',
-                    },
-                },
-                y: {
-                    title: {
-                        display: true,
-                        text: 'Đếm',
-                    },
-                    beginAtZero: true,
-                },
-            },
-        },
-    });
-
-    // Biểu đồ cột (bar chart)
-    const ctxBar = document.getElementById('timeChart').getContext('2d');
-    const postureBarChart = new Chart(ctxBar, {
-        type: 'bar',
-        data: {
-            labels: ['Thời gian đúng (Giờ)', 'Thời gian sai (Giờ)'],
-            datasets: [
-                {
-                    label: 'Thời gian sử dụng',
-                    data: [0, 0], // Dữ liệu ban đầu
-                    backgroundColor: ['rgba(75, 192, 192, 0.6)', 'rgba(255, 99, 132, 0.6)'],
-                    borderColor: ['rgba(75, 192, 192, 1)', 'rgba(255, 99, 132, 1)'],
-                    borderWidth: 1,
-                }
-            ],
-        },
-        options: {
-            responsive: true,
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'Giờ',
-                    },
-                },
-            },
-        },
-    });
-
-    // Hàm kiểm tra tư thế
-    function isCorrectPosture(data) {
-        const { Accel_X, Accel_Y, Accel_Z } = data;
-        return (
-            Accel_X >= 8 && Accel_X <= 10.2 &&
-            Accel_Y >= -1 && Accel_Y <= 2 &&
-            Accel_Z >= -1 && Accel_Z <= 2
-        );
-    }
-
-    // Hàm cập nhật thời gian
-    function updateTime(isCorrect) {
-        if (isCorrect) {
-            correctTime += 1; // Tăng thời gian ngồi đúng (1 giây)
-        } else {
-            incorrectTime += 1; // Tăng thời gian ngồi sai (1 giây)
-        }
-
-        // Cập nhật biểu đồ cột
-        const correctHours = (correctTime / 3600).toFixed(2); // Chuyển đổi giây sang giờ
-        const incorrectHours = (incorrectTime / 3600).toFixed(2); // Chuyển đổi giây sang giờ
-
-        postureBarChart.data.datasets[0].data = [correctHours, incorrectHours];
-        postureBarChart.update();
-    }
-
-    // Hàm cập nhật biểu đồ đường sau mỗi 30 giây
-    function updateLineChart() {
-        const timestamp = new Date().toLocaleTimeString(); // Thời gian hiện tại
-        labels.push(timestamp);
-
-        // Thêm dữ liệu vào lịch sử
-        correctCounts.push(correctCount);
-        incorrectCounts.push(incorrectCount);
-
-        // Xóa dữ liệu cũ nếu quá dài (giới hạn 20 lần đếm)
-        if (labels.length > 20) {
-            labels.shift();
-            correctCounts.shift();
-            incorrectCounts.shift();
-        }
-
-        // Reset bộ đếm
-        correctCount = 0;
-        incorrectCount = 0;
-
-        // Cập nhật biểu đồ đường
-        postureLineChart.update();
-    }
-
-    // Lắng nghe dữ liệu Firebase
-    async function listenToFirebaseRealtime() {
-        const url = `https://${FIREBASE_HOST}/MPU6050.json?auth=${FIREBASE_AUTH}`;
-
-        // Lấy dữ liệu mỗi giây
-        setInterval(async () => {
-            try {
-                const response = await fetch(url);
-                const data = await response.json();
-                console.log("Realtime Data:", data);
-
-                const isCorrect = isCorrectPosture(data);
-
-                // Cập nhật thời gian
-                updateTime(isCorrect);
-
-                // Cập nhật bộ đếm
-                if (isCorrect) {
-                    correctCount++;
-                } else {
-                    incorrectCount++;
-                }
-            } catch (error) {
-                console.error("Lỗi khi lấy dữ liệu:", error);
+// Khởi tạo biểu đồ thống kê tư thế
+const ctx = document.getElementById('postureChart').getContext('2d');
+const postureChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+        labels: ['Thời gian ngồi đúng (giây)', 'Thời gian ngồi sai (giây)'],
+        datasets: [{
+            label: 'Thống kê thời gian tư thế',
+            data: [0, 0],  // Giá trị ban đầu
+            backgroundColor: ['#4CAF50', '#F44336'], // Xanh lá cho đúng, đỏ cho sai
+            borderWidth: 1
+        }]
+    },
+    options: {
+        responsive: true,
+        scales: {
+            y: {
+                beginAtZero: true
             }
-        }, 1000);
-
-        // Cập nhật biểu đồ đường sau mỗi 30 giây
-        setInterval(updateLineChart, 30000);
+        }
     }
+});
 
-    // Bắt đầu lắng nghe Firebase
-    listenToFirebaseRealtime();
+// Hàm cập nhật dữ liệu tư thế
+function updatePostureData() {
+    fetch('/posture_data')  // API lấy dữ liệu tư thế từ server
+        .then(response => response.json())
+        .then(data => {
+            // Hiển thị thông tin lên UI
+            document.getElementById('posture-status').innerText = data.status;
+            document.getElementById('spine-angle').innerText = data.spine_angle + "°";
+            document.getElementById('confidence-level').innerText = data.confidence + "%";
+
+            // Tăng thời gian dựa trên tư thế
+            if (data.status.includes("Ngồi Đúng")) {
+                correctTime++;
+            } else {
+                incorrectTime++;
+            }
+
+            // Cập nhật dữ liệu biểu đồ
+            postureChart.data.datasets[0].data = [correctTime, incorrectTime];
+            postureChart.update();  // Vẽ lại biểu đồ
+        })
+        .catch(error => console.error('Lỗi khi lấy dữ liệu:', error));
+}
+
+// Gọi API mỗi giây để cập nhật thông tin
+setInterval(updatePostureData, 1000);
 </script>
-
-
 </body>
 </html>
