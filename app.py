@@ -1,12 +1,11 @@
-from flask import Flask, render_template, Response, Flask, jsonify
+from flask import Flask, render_template, Response, Flask, jsonify, request
 import cv2
 import mediapipe as mp
 import numpy as np
 import random
 import math
 from ultralytics import YOLO  # Thư viện YOLOv8
-
-
+import torch
 
 app = Flask(__name__)
 
@@ -369,6 +368,116 @@ def process_video(video_path):
 #         print(e)
 #         return "Lỗi khi gửi email.", 500
 
+
+
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+yolo_pose = YOLO("yolov8n-pose.pt").to(device)
+if device == "cuda":
+    yolo_pose = yolo_pose.half()
+
+MAX_SPINE_ANGLE = 15
+
+def calculate_angle(a, b, c):
+    if any(p is None for p in [a, b, c]):
+        return None
+    a, b, c = np.array(a), np.array(b), np.array(c)
+    ba, bc = a - b, c - b
+    cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
+    return np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0)))
+
+def get_point(landmarks, i):
+    if i < len(landmarks):
+        return landmarks[i][0], landmarks[i][1]
+    return None
+
+def analyze_posture(frame):
+    results = yolo_pose(frame)
+    if len(results) == 0 or results[0].keypoints is None:
+        cv2.putText(frame, "No person detected", (10, 30),
+                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        return frame
+
+    person_count = 0
+    for result in results:
+        keypoints = result.keypoints.xy.cpu().numpy()
+        boxes = result.boxes.xyxy.cpu().numpy()
+
+        for i, (kps, box) in enumerate(zip(keypoints, boxes)):
+            person_count += 1
+            if len(kps) < 13:
+                continue
+
+            left_shoulder = get_point(kps, 5)
+            right_shoulder = get_point(kps, 6)
+            left_hip = get_point(kps, 11)
+            right_hip = get_point(kps, 12)
+
+            if all([left_shoulder, right_shoulder, left_hip, right_hip]):
+                mid_shoulder = ((left_shoulder[0] + right_shoulder[0]) / 2,
+                              (left_shoulder[1] + right_shoulder[1]) / 2)
+                mid_hip = ((left_hip[0] + right_hip[0]) / 2,
+                         (left_hip[1] + right_hip[1]) / 2)
+
+                vertical_point = (mid_shoulder[0], mid_shoulder[1] + 100)
+                spine_angle = calculate_angle(mid_shoulder, mid_hip, vertical_point)
+
+                if spine_angle is not None:
+                    status = "correct" if spine_angle < MAX_SPINE_ANGLE else "incorrect"
+                    color = (0, 255, 0) if spine_angle < MAX_SPINE_ANGLE else (0, 0, 255)
+
+                    x1, y1, x2, y2 = map(int, box)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+
+                    for kp in kps:
+                        if kp[0] > 0 and kp[1] > 0:
+                            cv2.circle(frame, (int(kp[0]), int(kp[1])), 5, (255, 0, 0), -1)
+
+                    cv2.putText(frame, f"Person {person_count}: {status} ({spine_angle:.2f}°)",
+                               (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+    return frame
+
+def generate_camera_feed():
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("Không thể mở camera!")
+        return
+
+    while True:
+        success, frame = cap.read()
+        if not success:
+            break
+
+        frame = cv2.flip(frame, 1)
+        frame = analyze_posture(frame)
+
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame = buffer.tobytes()
+        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
+    cap.release()
+
+def generate_uploaded_feed():
+    global uploaded_video_path
+    if not uploaded_video_path:
+        return
+
+    cap = cv2.VideoCapture(uploaded_video_path)
+    while cap.isOpened():
+        success, frame = cap.read()
+        if not success:
+            break
+
+        frame = analyze_posture(frame)
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame = buffer.tobytes()
+        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
+    cap.release()
+
+uploaded_video_path = None
+
+
 @app.route('/')
 def index():
     return render_template('home.html')
@@ -386,8 +495,70 @@ def predic():
 def news():
     return render_template('new.html')
 
+
+@app.route('/class_predict')
+def class_index():
+    return render_template('class.html')
+
+def generate_camera_feed():
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("Không thể mở camera!")
+        return
+
+    while True:
+        success, frame = cap.read()
+        if not success:
+            break
+
+        frame = cv2.flip(frame, 1)
+        frame = analyze_posture(frame)
+
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame = buffer.tobytes()
+        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
+    cap.release()
+
+def generate_uploaded_feed():
+    global uploaded_video_path
+    if not uploaded_video_path:
+        return
+
+    cap = cv2.VideoCapture(uploaded_video_path)
+    while cap.isOpened():
+        success, frame = cap.read()
+        if not success:
+            break
+
+        frame = analyze_posture(frame)
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame = buffer.tobytes()
+        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
+    cap.release()
+
+uploaded_video_path = None
+
+@app.route('/class_feed')
+def class_feed():
+    return render_template('class_feed.html')
+
 @app.route('/video_class_feed')
 def video_class_feed():
+    return Response(generate_camera_feed(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/upload_video', methods=['POST'])
+def upload_video():
+    global uploaded_video_path
+    video = request.files['video']
+    uploaded_video_path = f"uploads/{video.filename}"
+    video.save(uploaded_video_path)
+    return "Video uploaded successfully", 200
+
+
+@app.route('/video_feed_index')
+def video_feed_index():
     def generate():
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
@@ -400,7 +571,7 @@ def video_class_feed():
                 break
 
             frame = cv2.flip(frame, 1)
-            frame = calculate_angle(frame)
+            frame = detect_posture(frame)
 
             _, buffer = cv2.imencode('.jpg', frame)
             frame = buffer.tobytes()
@@ -409,14 +580,11 @@ def video_class_feed():
         cap.release()
 
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+@app.route('/video_class_feed_upload')
+def video_class_feed_upload():
+    return Response(generate_uploaded_feed(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-@app.route('/class_feed')
-def video_class():
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-@app.route('/class_predict')
-def class_index():
-    return render_template('class.html')
 @app.route('/video_feed')
 def video_feed():
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')

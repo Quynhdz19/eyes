@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <title>HI</title>
+ <style>
+
+        body {
+            background: #1E1E2E;
+            color: #fff;
+            font-family: 'Arial', sans-serif;
+            text-align: center;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1000px;
+            margin: auto;
+            padding: 30px;
+            background: #2A2D3E;
+            border-radius: 15px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+        }
+        h1 {
+            color: #FF9800;
+            font-size: 2rem;
+            margin-bottom: 20px;
+        }
+        .options {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        .option-btn {
+            padding: 10px 20px;
+            background: #424769;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+        .option-btn:hover, .option-btn.active {
+            background: #FF9800;
+            color: #000;
+        }
+        #videoFeed {
+            width: 100%;
+            max-width: 800px;
+        }
+        #uploadInput {
+            margin: 20px 0;
+        }
+    </style>
+
+</head>
+<body>
+
+<div class="container">
+        <h1>Check camera tập thể</h1>
+
+        <div class="options">
+            <div class="option-btn active" onclick="showCamera()">Camera trực tiếp</div>
+            <div class="option-btn" onclick="showUpload()">Tải video lên</div>
+        </div>
+
+        <div id="cameraFeed" style="display: block;">
+            <img id="videoFeed" src="{{ url_for('video_class_feed') }}" alt="Video feed">
+        </div>
+
+        <div id="uploadFeed" style="display: none;">
+            <input type="file" id="uploadInput" accept="video/*">
+            <button onclick="uploadVideo()">Xử lý video</button>
+            <div id="uploadResult"></div>
+        </div>
+
+        <div><a href="/">Trở về</a></div>
+    </div>
+
+<script>
+
+    function showCamera() {
+            document.getElementById('cameraFeed').style.display = 'block';
+            document.getElementById('uploadFeed').style.display = 'none';
+            document.querySelectorAll('.option-btn')[0].classList.add('active');
+            document.querySelectorAll('.option-btn')[1].classList.remove('active');
+            document.getElementById('videoFeed').src = "{{ url_for('video_class_feed') }}";
+        }
+
+        function showUpload() {
+            document.getElementById('cameraFeed').style.display = 'none';
+            document.getElementById('uploadFeed').style.display = 'block';
+            document.querySelectorAll('.option-btn')[0].classList.remove('active');
+            document.querySelectorAll('.option-btn')[1].classList.add('active');
+            document.getElementById('videoFeed').src = '';
+        }
+
+        function uploadVideo() {
+            const fileInput = document.getElementById('uploadInput');
+            if (!fileInput.files[0]) {
+                alert('Vui lòng chọn video!');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('video', fileInput.files[0]);
+
+            fetch('/upload_video', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                document.getElementById('uploadResult').innerHTML = '<img src="/video_class_feed_upload" id="videoFeed">';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Lỗi khi xử lý video');
+            });
+        }
+
+        document.getElementById("uploadBtn").addEventListener("click", function () {
+            let file = document.getElementById("fileInput").files[0];
+            if (!file) {
+                alert("Vui lòng chọn một ảnh!");
+                return;
+            }
+
+            let formData = new FormData();
+            formData.append("file", file);
+
+            axios({
+                method: "POST",
+                url: "https://detect.roboflow.com/student-behaviour-detection-neazg/6?api_key=z1SX7Kx3AFRQL9KAsjFr&confidence=10&overlap=30&labels=on&format=image&stroke=2",
+                data: formData,
+                headers: { "Content-Type": "multipart/form-data" },
+                responseType: "blob"  // ✅ Chuyển dữ liệu về dạng `blob`
+            })
+            .then(response => {
+                let imageUrl = URL.createObjectURL(response.data); // 🔥 Chuyển `blob` thành URL
+                document.getElementById("outputImage").src = imageUrl;
+                document.getElementById("outputImage").style.display = "block";
+                document.getElementById("jsonOutput").innerText = "";
+            })
+            .catch(error => {
+                console.error("❌ Lỗi gửi ảnh:", error.message);
+                document.getElementById("prediction").innerText = "Lỗi kết nối API!";
+            });
+        });
+    </script>
+
+</body>
+</html>
