@@ -128,83 +128,90 @@ def generate_frames():
 
 
 # **Khởi tạo MediaPipe Pose**
-mp_pose = mp.solutions.pose
-mp_drawing = mp.solutions.drawing_utils
-MAX_SPINE_ANGLE = 70  # Nếu > 15° → ngồi sai tư thế
+yolo_pose = YOLO("yolov8n-pose.pt")  # Load mô hình YOLOv8 Pose
+MAX_SPINE_ANGLE = 70  # If > 70° → incorrect posture
 
-# **Biến toàn cục để lưu trạng thái tư thế**
-posture_data = {"status": "Đang phân tích...", "spine_angle": "--", "confidence": "--"}
+# **Global variable to store posture state**
+posture_data = {"status": "Analyzing...", "spine_angle": "--", "confidence": "--"}
+
+def calculate_angle(point1, point2, point3):
+    """Calculate angle between three points"""
+    a = np.array(point1)
+    b = np.array(point2)
+    c = np.array(point3)
+    ba = a - b
+    bc = c - b
+    cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
+    angle = np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0)))
+    return angle
+
+def get_point(keypoints, index):
+    """Get (x, y) coordinates from keypoints if valid"""
+    x, y = keypoints[index]
+    if x > 0 and y > 0:
+        return (int(x), int(y))
+    return None
 
 def detect_posture(frame):
-    """Nhận diện tư thế ngồi bằng MediaPipe Pose và OpenCV"""
-    height, width, _ = frame.shape
+    """Detect posture using YOLO Pose and return processed frame with data"""
     global posture_data
+    results = yolo_pose(frame)
+    output_data = []
 
-    with mp_pose.Pose(min_detection_confidence=0.8, min_tracking_confidence=0.8) as pose:
-        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        pose_results = pose.process(image_rgb)
+    if len(results) == 0 or results[0].keypoints is None:
+        cv2.putText(frame, "No person detected", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        posture_data = {"status": "Not detected", "spine_angle": "--", "confidence": "--"}
+        output_data.append(posture_data)
+        return frame, output_data
 
-        # **Nếu MediaPipe không tìm thấy người, thử sử dụng OpenPose hoặc YOLO**
-        if not pose_results.pose_landmarks:
-            print("⚠️ Không tìm thấy người bằng MediaPipe! Đang sử dụng OpenCV DNN...")
-            frame = detect_body_with_opencv(frame)
-            return frame
+    person_count = 0
+    for result in results:
+        keypoints = result.keypoints.xy.cpu().numpy()
+        boxes = result.boxes.xyxy.cpu().numpy()
 
-        # **Vẽ khung nhận diện**
-        mp_drawing.draw_landmarks(frame, pose_results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
-        landmarks = pose_results.pose_landmarks.landmark
+        for i, (kps, box) in enumerate(zip(keypoints, boxes)):
+            person_count += 1
+            if len(kps) < 13:
+                continue
 
-        def get_point(landmark):
-            """Lấy tọa độ (x, y) từ keypoint nếu nhìn thấy rõ"""
-            if landmark.visibility > 0.5:
-                return int(landmark.x * width), int(landmark.y * height)
-            return None
+            left_shoulder = get_point(kps, 5)
+            right_shoulder = get_point(kps, 6)
+            left_hip = get_point(kps, 11)
+            right_hip = get_point(kps, 12)
 
-        # **Lấy các điểm quan trọng trên cơ thể**
-        left_shoulder = get_point(landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER])
-        right_shoulder = get_point(landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER])
-        left_hip = get_point(landmarks[mp_pose.PoseLandmark.LEFT_HIP])
-        right_hip = get_point(landmarks[mp_pose.PoseLandmark.RIGHT_HIP])
+            if all([left_shoulder, right_shoulder, left_hip, right_hip]):
+                mid_shoulder = ((left_shoulder[0] + right_shoulder[0]) / 2,
+                                (left_shoulder[1] + right_shoulder[1]) / 2)
+                mid_hip = ((left_hip[0] + right_hip[0]) / 2,
+                           (left_hip[1] + right_hip[1]) / 2)
 
-        mid_shoulder = ((left_shoulder[0] + right_shoulder[0]) // 2,
-                        (left_shoulder[1] + right_shoulder[1]) // 2) if left_shoulder and right_shoulder else None
-        mid_hip = ((left_hip[0] + right_hip[0]) // 2,
-                   (left_hip[1] + right_hip[1]) // 2) if left_hip and right_hip else None
+                vertical_point = (mid_shoulder[0], mid_shoulder[1] + 100)
+                spine_angle = calculate_angle(mid_shoulder, mid_hip, vertical_point)
 
-        # **Tính góc nghiêng xương sống**
-        if mid_shoulder and mid_hip and left_hip:
-            a, b, c = np.array(mid_shoulder), np.array(mid_hip), np.array(left_hip)
-            ba, bc = a - b, c - b
-            cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
-            spine_angle = np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0)))
+                if spine_angle is not None:
+                    status = "Correct" if spine_angle < MAX_SPINE_ANGLE else "Incorrect"
+                    color = (0, 255, 0) if spine_angle < MAX_SPINE_ANGLE else (0, 0, 255)
 
-            # **Dự báo tư thế ngồi**
-            if spine_angle < MAX_SPINE_ANGLE:
-                status_text = "✅ Ngồi Đúng"
-                color = (0, 255, 0)  # Xanh: ngồi đúng
-            else:
-                status_text = "⚠️ Ngồi Sai!"
-                color = (0, 0, 255)  # Đỏ: ngồi sai
+                    x1, y1, x2, y2 = map(int, box)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
 
-            # **Vẽ đường nối quan trọng**
-            def draw_line(a, b, color):
-                if a and b:
-                    cv2.line(frame, a, b, color, 3)
+                    for kp in kps:
+                        if kp[0] > 0 and kp[1] > 0:
+                            cv2.circle(frame, (int(kp[0]), int(kp[1])), 5, (255, 0, 0), -1)
 
-            draw_line(mid_shoulder, mid_hip, (255, 0, 0))  # Cổ → Hông
-            draw_line(left_shoulder, right_shoulder, (0, 255, 255))  # Vai
-            draw_line(left_hip, right_hip, (0, 255, 255))  # Hông
+                    cv2.putText(frame, f"Person {person_count}: {status} ({spine_angle:.2f}°)",
+                                (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-            print(f"📡 Gửi dữ liệu: {status_text}, Góc: {round(spine_angle, 2)}°")
+                    confidence = float(result.boxes.conf[i].cpu().numpy()) * 100 if result.boxes.conf is not None else 100
+                    posture_data = {
+                        "status": status,
+                        "spine_angle": round(spine_angle, 2),
+                        "confidence": round(confidence, 2)
+                    }
+                    output_data.append(posture_data)
 
-            # **Lưu dữ liệu tư thế**
-            posture_data = {
-                "status": status_text,
-                "spine_angle": round(spine_angle, 2),
-                "confidence": 100  # MediaPipe không có confidence
-            }
-
-    return frame
+    return frame, output_data
 
 def detect_body_with_opencv(frame):
     """Nhận diện người bằng OpenCV DNN khi MediaPipe không hoạt động"""
@@ -562,7 +569,7 @@ def video_feed_index():
     def generate():
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
-            print("Không thể mở camera!")
+            print("Cannot open camera!")
             return
 
         while True:
@@ -571,11 +578,13 @@ def video_feed_index():
                 break
 
             frame = cv2.flip(frame, 1)
-            frame = detect_posture(frame)
+            frame, data = detect_posture(frame)
+            global posture_data
+            posture_data = data[0] if data else {"status": "Not detected", "spine_angle": "--", "confidence": "--"}
 
             _, buffer = cv2.imencode('.jpg', frame)
-            frame = buffer.tobytes()
-            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            frame_bytes = buffer.tobytes()
+            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
         cap.release()
 

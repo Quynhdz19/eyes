@@ -6,56 +6,117 @@
     <title>Ngồi Sai Tư Thế Với Mắt Cận</title>
     <style>
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'Segoe UI', Arial, sans-serif;
             margin: 0;
             padding: 0;
-            background-color: #f8f9fb;
+            background-color: #f0f4f8;
+            color: #333;
+            line-height: 1.6;
         }
         header {
-            padding: 20px;
-            max-width: 800px;
-            margin: 0 auto;
-            background-color: rgba(0, 120, 215, 0.29);
+            padding: 30px;
+            max-width: 900px;
+            margin: 20px auto;
+            background: linear-gradient(135deg, #0078d7, #00c4b4);
             text-align: center;
-        }
-        .container {
-            padding: 20px;
-            max-width: 800px;
-            margin: 0 auto;
-            background-color: white;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            border-radius: 15px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
         }
         h1 {
-            color: #0078d7;
-            text-align: center;
+            color: white;
+            font-size: 2.2em;
+            margin: 0;
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.2);
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto 20px;
+            padding: 25px;
+            background-color: #ffffff;
+            border-radius: 15px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
         }
         .issue {
             display: flex;
-            align-items: center;
-            margin-bottom: 20px;
+            align-items: flex-start;
+            margin-bottom: 30px;
+            padding: 15px;
+            background-color: #f9fbfd;
+            border-radius: 10px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .issue:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.1);
         }
         .issue img {
-            width: 150px;
-            height: 150px;
+            width: 180px;
+            height: 180px;
             object-fit: cover;
-            margin-right: 20px;
+            margin-right: 25px;
             border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
         }
-        .issue p {
-            font-size: 16px;
-            color: #333;
-            line-height: 1.5;
+        .issue div {
+            flex: 1;
+        }
+        .issue strong {
+            font-size: 1.3em;
+            color: #0078d7;
+            display: block;
+            margin-bottom: 10px;
+        }
+        .issue span {
+            font-size: 1.1em;
+            color: #555;
+            display: block;
+            margin-bottom: 15px;
+        }
+        .issue ul {
+            padding-left: 20px;
+            margin: 0;
+        }
+        .issue li {
+            font-size: 1em;
+            color: #444;
+            margin-bottom: 8px;
+            list-style-type: disc;
+        }
+        .home-link {
+            display: block;
+            text-align: center;
+            margin-top: 20px;
+            font-size: 1.1em;
+            color: #0078d7;
+            text-decoration: none;
+            padding: 10px 20px;
+            border: 2px solid #0078d7;
+            border-radius: 25px;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        .home-link:hover {
+            background-color: #0078d7;
+            color: white;
         }
         footer {
-            max-width: 800px;
+            max-width: 900px;
             margin: 0 auto;
-            text-align: center;
             padding: 20px;
-            background-color: rgba(0, 120, 215, 0.29);
+            background: linear-gradient(135deg, #0078d7, #00c4b4);
             color: white;
-            position: relative;
-            bottom: 0;
-            width: 100%;
+            text-align: center;
+            border-radius: 15px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        footer p {
+            margin: 0;
+            font-size: 1em;
+        }
+        .loading {
+            text-align: center;
+            font-size: 1.2em;
+            color: #0078d7;
+            padding: 20px;
         }
     </style>
 </head>
@@ -63,80 +124,126 @@
 <header>
     <h1 id="title">Ngồi Sai Tư Thế Với Mắt Cận</h1>
 </header>
-<div class="container">
-    <div class="issue">
-        <img src="/static/anh1.png" alt="Ngồi sai tư thế">
-        <div>
-            <strong id="issue1">Ngồi sai tư thế:</strong>
-            <span id="description1">Thói quen ngồi sai tư thế có thể gây ra các vấn đề về cột sống và ảnh hưởng đến sức khỏe tổng thể.</span>
-            <ul>
-                <li id="point1">Cột sống bị cong vẹo.</li>
-                <li id="point2">Đau lưng và vai gáy thường xuyên.</li>
-            </ul>
-        </div>
-    </div>
-    <div class="issue">
-        <img src="/static/anh6.png" alt="Mắt cận thị">
-        <div>
-            <strong id="issue2">Mắt cận thị:</strong>
-            <span id="description2">Mắt cận có thể trở nên tệ hơn do tư thế ngồi không đúng và tiếp xúc với màn hình quá lâu.</span>
-            <ul>
-                <li id="point3">Khó nhìn xa.</li>
-                <li id="point4">Mỏi mắt khi đọc sách hoặc dùng máy tính trong thời gian dài.</li>
-            </ul>
-        </div>
-    </div>
-    <div class="issue">
-        <img src="/static/anh7.png" alt="Đau lưng">
-        <div>
-            <strong id="issue3">Đau lưng mãn tính:</strong>
-            <span id="description3">Ngồi sai tư thế trong thời gian dài có thể gây áp lực lớn lên cột sống, dẫn đến đau lưng mãn tính.</span>
-            <ul>
-                <li id="point5">Đau âm ỉ hoặc nhức lưng khi ngồi lâu.</li>
-                <li id="point6">Đau lan xuống chân hoặc lên vai.</li>
-            </ul>
-        </div>
-    </div>
-    <div class="issue">
-        <img src="/static/anh9.png" alt="Đau cổ vai gáy">
-        <div>
-            <strong id="issue4">Đau cổ vai gáy:</strong>
-            <span id="description4">Tư thế ngồi không đúng có thể gây căng cơ vùng cổ và vai gáy.</span>
-            <ul>
-                <li id="point7">Căng cứng cơ vùng cổ và vai.</li>
-                <li id="point8">Khó quay cổ hoặc đau khi cúi đầu.</li>
-            </ul>
-        </div>
-    </div>
-    <div class="issue">
-        <img src="/static/anh10.png" alt="Mỏi mắt">
-        <div>
-            <strong id="issue5">Mỏi mắt kỹ thuật số:</strong>
-            <span id="description5">Nhìn màn hình trong thời gian dài có thể gây mỏi mắt và giảm thị lực tạm thời.</span>
-            <ul>
-                <li id="point9">Khó tập trung sau khi nhìn màn hình lâu.</li>
-                <li id="point10">Khô mắt và nhức đầu.</li>
-            </ul>
-        </div>
-    </div>
-    <div class="issue">
-        <img src="/static/anh12.png" alt="Đau đầu">
-        <div>
-            <strong id="issue6">Đau đầu:</strong>
-            <span id="description6">Tư thế ngồi sai và mỏi mắt có thể dẫn đến đau đầu do căng cơ và mệt mỏi thị giác.</span>
-            <ul>
-                <li id="point11">Đau đầu vùng trán hoặc thái dương.</li>
-                <li id="point12">Cảm giác nặng đầu, đặc biệt vào buổi chiều.</li>
-            </ul>
-        </div>
-    </div>
-    <a href="/" id="home">Trang chủ</a>
+<div class="container" id="content">
+    <div class="loading">Đang tải bài viết...</div>
 </div>
+<footer>
+    <p>© 2024 Tuyên Truyền Sức Khỏe</p>
+</footer>
 
 <script>
+    function loadArticles() {
+        // Dữ liệu giả phong phú hơn bằng tiếng Việt (12 bài)
+        const mockArticles = [
+            {
+                title: "Ngồi sai tư thế ảnh hưởng đến cột sống như thế nào?",
+                description: "Ngồi sai tư thế trong thời gian dài có thể gây đau lưng, cong vẹo cột sống và ảnh hưởng đến dáng đi.",
+                image: "/static/anh1.png"
+            },
+            {
+                title: "Mắt cận thị do sử dụng máy tính sai cách",
+                description: "Khoảng cách mắt đến màn hình quá gần và thời gian sử dụng lâu làm tăng nguy cơ cận thị.",
+                image: "/static/anh6.png"
+            },
+            {
+                title: "Đau lưng mãn tính vì thói quen ngồi học",
+                description: "Áp lực từ tư thế ngồi gù lưng gây đau nhức kéo dài, đặc biệt ở học sinh, sinh viên.",
+                image: "/static/anh7.png"
+            },
+            {
+                title: "Đau cổ vai gáy do cúi đầu xem điện thoại",
+                description: "Thói quen cúi đầu khi dùng điện thoại gây căng cơ cổ và vai gáy, dễ dẫn đến thoái hóa đốt sống cổ.",
+                image: "/static/anh9.png"
+            },
+            {
+                title: "Mỏi mắt kỹ thuật số ở dân văn phòng",
+                description: "Nhìn màn hình liên tục mà không nghỉ làm mắt khô, mỏi và giảm thị lực tạm thời.",
+                image: "/static/anh10.png"
+            },
+            {
+                title: "Đau đầu do tư thế ngồi và căng thẳng mắt",
+                description: "Tư thế sai kết hợp với mắt làm việc quá sức gây đau đầu vùng trán và thái dương.",
+                image: "/static/anh12.png"
+            },
+            {
+                title: "Ngồi sai tư thế làm tăng nguy cơ thoát vị đĩa đệm",
+                description: "Áp lực không đều lên cột sống khi ngồi sai có thể gây tổn thương đĩa đệm.",
+                image: "/static/anh13.png"
+            },
+            {
+                title: "Cận thị ở trẻ em do học online nhiều",
+                description: "Trẻ ngồi sai tư thế và nhìn màn hình lâu khi học trực tuyến dễ bị cận thị sớm.",
+                image: "/static/anh14.png"
+            },
+            {
+                title: "Đau lưng dưới do ngồi ghế không đúng chuẩn",
+                description: "Ghế không hỗ trợ lưng tốt làm tăng áp lực lên vùng thắt lưng khi ngồi lâu.",
+                image: "/static/anh15.png"
+            },
+            {
+                title: "Tư thế ngồi sai ảnh hưởng đến tuần hoàn máu",
+                description: "Ngồi gù hoặc bắt chéo chân lâu làm máu lưu thông kém, gây tê chân tay.",
+                image: "/static/anh16.png"
+            },
+            {
+                title: "Mỏi mắt và khô mắt khi làm việc với laptop",
+                description: "Tư thế ngồi không đúng làm mắt phải điều tiết nhiều, dẫn đến khô và nhức.",
+                image: "/static/anh17.png"
+            },
+            {
+                title: "Đau đầu mãn tính từ thói quen ngồi sai",
+                description: "Căng cơ cổ và vai do tư thế xấu gây đau đầu kéo dài, khó chịu hàng ngày.",
+                image: "/static/anh18.png"
+            }
+        ];
+
+        const contentDiv = document.getElementById('content');
+        contentDiv.innerHTML = ''; // Xóa nội dung "Đang tải..."
+
+        mockArticles.forEach((article, index) => {
+            const issueDiv = document.createElement('div');
+            issueDiv.className = 'issue';
+
+            // Tạo thẻ hình ảnh
+            const img = document.createElement('img');
+            img.src = article.image || `/static/anh${index + 1}.png`; // Fallback nếu thiếu ảnh
+            img.alt = article.title;
+
+            // Tạo nội dung bài viết
+            const textDiv = document.createElement('div');
+            const titleEl = document.createElement('strong');
+            titleEl.textContent = article.title;
+            const descEl = document.createElement('span');
+            descEl.textContent = article.description;
+
+            // Tạo danh sách tác động
+            const ul = document.createElement('ul');
+            const keywords = ['cột sống', 'mắt', 'đau lưng', 'vai gáy', 'mỏi mắt', 'đau đầu', 'đĩa đệm', 'thị lực', 'tuần hoàn', 'tê chân', 'khô mắt', 'thoái hóa'];
+            for (let i = 0; i < 3; i++) {
+                const li = document.createElement('li');
+                li.textContent = `Tác động đến ${keywords[index % keywords.length]}: ${article.description.slice(0, 50) + '...'}`;
+                ul.appendChild(li);
+            }
+
+            textDiv.appendChild(titleEl);
+            textDiv.appendChild(descEl);
+            textDiv.appendChild(ul);
+
+            issueDiv.appendChild(img);
+            issueDiv.appendChild(textDiv);
+            contentDiv.appendChild(issueDiv);
+        });
+
+        // Thêm nút Trang chủ
+        const homeLink = document.createElement('a');
+        homeLink.href = '/';
+        homeLink.className = 'home-link';
+        homeLink.textContent = 'Quay về Trang chủ';
+        contentDiv.appendChild(homeLink);
+    }
+
+    // Gọi hàm khi trang tải xong
+    window.onload = loadArticles;
 </script>
-<footer>
-    <p>&copy; 2024 Tuyên Truyền Sức Khỏe</p>
-</footer>
 </body>
 </html>
