@@ -1,3 +1,5 @@
+from collections import deque
+
 from flask import Flask, render_template, Response, Flask, jsonify, request
 import cv2
 import mediapipe as mp
@@ -18,11 +20,12 @@ mp_hands = mp.solutions.hands
 mp_pose = mp.solutions.pose
 mp_face = mp.solutions.face_mesh
 mp_drawing = mp.solutions.drawing_utils
+mp_face_detection = mp.solutions.face_detection
+mp_face_mesh = mp.solutions.face_mesh
 
 MIN_FACE_DISTANCE = 50   # Cận (pixels)
 MAX_FACE_DISTANCE = 250  # Xa (pixels)
 
-# Hàm tính toán hướng chỉ tay
 def calculate_hand_direction(wrist, index_finger_tip):
     dx = index_finger_tip.x - wrist.x
     dy = index_finger_tip.y - wrist.y
@@ -37,6 +40,73 @@ def calculate_hand_direction(wrist, index_finger_tip):
     elif -135 <= angle < -45:
         return 'up'
 
+# Hàm tính khoảng cách giữa hai điểm
+def calculate_distance(p1, p2):
+    return math.sqrt((p2.x - p1.x)**2 + (p2.y - p1.y)**2 + (p2.z - p1.z)**2)
+
+# Hàm phát hiện lắc đầu với Face Mesh
+def detect_head_shake(face_landmarks, prev_head_pos, frame_count, shake_threshold=0.8, frame_window=20, smoothing_window=20):
+    if face_landmarks is None or frame_count < frame_window:
+        return False, None
+
+    # Lấy các điểm chính trên khuôn mặt
+    left_ear = face_landmarks.landmark[33]    # Tai trái
+    right_ear = face_landmarks.landmark[263]  # Tai phải
+    nose_tip = face_landmarks.landmark[1]     # Đỉnh mũi
+    left_eye = face_landmarks.landmark[159]   # Mắt trái
+    right_eye = face_landmarks.landmark[386]  # Mắt phải
+
+    # Tính góc yaw (nghiêng ngang)
+    dx_yaw = right_ear.x - left_ear.x
+    dy_yaw = right_ear.y - left_ear.y
+    current_yaw = math.degrees(math.atan2(dy_yaw, dx_yaw))
+
+    # Tính góc pitch (ngửa/úp)
+    eye_center_x = (left_eye.x + right_eye.x) / 2
+    eye_center_y = (left_eye.y + right_eye.y) / 2
+    eye_center_z = (left_eye.z + right_eye.z) / 2
+    dx_pitch = nose_tip.x - eye_center_x
+    dy_pitch = nose_tip.y - eye_center_y
+    current_pitch = math.degrees(math.atan2(dy_pitch, -nose_tip.z))
+
+    # Tính góc roll (nghiêng dọc)
+    dy_roll = right_eye.y - left_eye.y
+    dx_roll = right_eye.x - left_eye.x
+    current_roll = math.degrees(math.atan2(dy_roll, dx_roll))
+
+    # Tạo bộ nhớ tạm cho smoothing
+    if not hasattr(detect_head_shake, 'yaw_history'):
+        detect_head_shake.yaw_history = deque(maxlen=smoothing_window)
+        detect_head_shake.pitch_history = deque(maxlen=smoothing_window)
+        detect_head_shake.roll_history = deque(maxlen=smoothing_window)
+
+    detect_head_shake.yaw_history.append(current_yaw)
+    detect_head_shake.pitch_history.append(current_pitch)
+    detect_head_shake.roll_history.append(current_roll)
+
+    # Tính giá trị trung bình để giảm nhiễu
+    smoothed_yaw = np.mean(detect_head_shake.yaw_history)
+    smoothed_pitch = np.mean(detect_head_shake.pitch_history)
+    smoothed_roll = np.mean(detect_head_shake.roll_history)
+
+    if prev_head_pos is None:
+        return False, (smoothed_yaw, smoothed_pitch, smoothed_roll)
+
+    prev_yaw, prev_pitch, prev_roll = prev_head_pos
+
+    # Tính độ thay đổi của từng góc
+    yaw_change = abs(smoothed_yaw - prev_yaw)
+    pitch_change = abs(smoothed_pitch - prev_pitch)
+    roll_change = abs(smoothed_roll - prev_roll)
+
+    # Debug để kiểm tra giá trị thay đổi
+    print(f"Yaw change: {yaw_change:.2f}, Pitch change: {pitch_change:.2f}, Roll change: {roll_change:.2f}")
+
+    # Phát hiện lắc đầu với ngưỡng cao hơn
+    if yaw_change > shake_threshold or pitch_change > shake_threshold or roll_change > shake_threshold:
+        return True, (smoothed_yaw, smoothed_pitch, smoothed_roll)
+
+    return False, (smoothed_yaw, smoothed_pitch, smoothed_roll)
 
 # Hàm tạo khung hình video
 def generate_frames():
@@ -55,8 +125,18 @@ def generate_frames():
     current_orientation = random.choice(orientations)
     current_size = initial_size
 
+    # Biến kiểm tra
+    prev_head_pos = None
+    frame_count = 0
+    shake_cooldown = 0
+    face_missing_cooldown = 0
+    action_locked = False
+    prev_detected_orientation = None
+    head_shaking = False
     with mp_hands.Hands(min_detection_confidence=0.7, min_tracking_confidence=0.7) as hands, \
-            mp_pose.Pose(min_detection_confidence=0.7, min_tracking_confidence=0.7) as pose:
+            mp_pose.Pose(min_detection_confidence=0.7, min_tracking_confidence=0.7) as pose, \
+            mp_face_detection.FaceDetection(min_detection_confidence=0.7) as face_detection, \
+            mp_face_mesh.FaceMesh(min_detection_confidence=0.7, min_tracking_confidence=0.7, max_num_faces=1) as face_mesh:
 
         while True:
             success, frame = cap.read()
@@ -64,8 +144,10 @@ def generate_frames():
                 break
 
             frame = cv2.flip(frame, 1)
+            frame_count += 1
 
-            if total_c_created >= 30:  # Kiểm tra nếu đạt 30 chữ "C"
+            # Kết thúc sau 30 chữ C
+            if total_c_created >= 30:
                 cv2.putText(frame, "Da ket thuc!", (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 3)
                 cv2.putText(frame, f"Diem dung: {count_correct}/{total_c_created}", (50, 250),
                             cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 3)
@@ -75,44 +157,116 @@ def generate_frames():
                        b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
                 continue
 
-            # Tạo hình ảnh chữ "C"
-            canvas = np.ones((300, 300, 3), dtype=np.uint8) * 255
-            center = (150, 150)
-            start_angle, end_angle = {
-                'right': (45, 315),
-                'left': (225, 495),
-                'up': (-45, 225),
-                'down': (135, 405)
-            }[current_orientation]
-
-            cv2.ellipse(canvas, center, (current_size, current_size), 0, start_angle, end_angle, (0, 0, 0), 15)
-            h, w, _ = canvas.shape
-            y_offset = (frame.shape[0] - h) // 2
-            x_offset = (frame.shape[1] - w) // 2
-            frame[y_offset:y_offset + h, x_offset:x_offset + w] = canvas
-
             # Chuyển đổi sang RGB
             image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             hand_results = hands.process(image_rgb)
             pose_results = pose.process(image_rgb)
+            face_results = face_detection.process(image_rgb)
+            face_mesh_results = face_mesh.process(image_rgb)
 
-            # Xử lý nhận diện bàn tay và cơ thể
-            if hand_results.multi_hand_landmarks:
+            # Kiểm tra nhận diện khuôn mặt
+            face_detected = False
+            if face_results.detections:
+                face_detected = True
+                for detection in face_results.detections:
+                    bboxC = detection.location_data.relative_bounding_box
+                    ih, iw, _ = frame.shape
+                    bbox = int(bboxC.xmin * iw), int(bboxC.ymin * ih), \
+                           int(bboxC.width * iw), int(bboxC.height * ih)
+                    cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[0] + bbox[2], bbox[1] + bbox[3]),
+                                  (255, 0, 0), 2)
+
+            # Nếu không phát hiện khuôn mặt
+            if not face_detected:
+                face_missing_cooldown = 30
+                cv2.putText(frame, "No face detected - Skipping C", (10, 60),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+            # Giảm thời gian cooldown
+            if face_missing_cooldown > 0:
+                face_missing_cooldown -= 1
+            if shake_cooldown > 0:
+                shake_cooldown -= 1
+
+            # Kiểm tra lắc đầu
+            is_shaking = False
+            if face_mesh_results.multi_face_landmarks and face_detected and face_missing_cooldown == 0:
+                for face_landmarks in face_mesh_results.multi_face_landmarks:
+                    is_shaking, prev_head_pos = detect_head_shake(face_landmarks, prev_head_pos, frame_count)
+                    if is_shaking and shake_cooldown == 0 and not head_shaking:
+                        # Chỉ kích hoạt khi bắt đầu lắc đầu (head_shaking = False)
+                        head_shaking = True
+                        shake_cooldown = 60  # Tăng cooldown lên 2 giây (60 frame ở 30 FPS)
+                        total_c_created += 1
+                        current_size = max(current_size - size_decrement, min_size)
+                        available_orientations = [o for o in orientations if o != current_orientation]
+                        current_orientation = random.choice(available_orientations)
+                        cv2.putText(frame, "Head shake - Next C", (10, 90),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+                    elif not is_shaking and head_shaking and shake_cooldown > 0:
+                        # Giữ trạng thái head_shaking cho đến khi cooldown hết
+                        pass
+                    elif not is_shaking and shake_cooldown == 0:
+                        # Reset trạng thái khi đầu ổn định và cooldown hết
+                        head_shaking = False
+
+            if pose_results.pose_landmarks:
+                mp_drawing.draw_landmarks(frame, pose_results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+
+            # Vẽ chữ "C" nếu có khuôn mặt
+            if face_missing_cooldown == 0:
+                canvas = np.ones((300, 300, 3), dtype=np.uint8) * 255
+                center = (150, 150)
+                start_angle, end_angle = {
+                    'right': (45, 315),
+                    'left': (225, 495),
+                    'up': (-45, 225),
+                    'down': (135, 405)
+                }[current_orientation]
+
+                cv2.ellipse(canvas, center, (current_size, current_size), 0, start_angle, end_angle, (0, 0, 0), 15)
+                h, w, _ = canvas.shape
+                y_offset = (frame.shape[0] - h) // 2
+                x_offset = (frame.shape[1] - w) // 2
+                frame[y_offset:y_offset + h, x_offset:x_offset + w] = canvas
+
+            # Xử lý nhận diện bàn tay
+            detected_orientation = None
+            if hand_results.multi_hand_landmarks and face_missing_cooldown == 0:
                 for hand_landmarks in hand_results.multi_hand_landmarks:
-                    mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+                    mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS,
+                                              mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=4),
+                                              mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=2))
                     wrist = hand_landmarks.landmark[mp_hands.HandLandmark.WRIST]
                     index_finger_tip = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
                     detected_orientation = calculate_hand_direction(wrist, index_finger_tip)
+                    break
+
+            # Xử lý hành động chỉ tay
+            if detected_orientation is not None and not action_locked and shake_cooldown == 0:
+                if detected_orientation != prev_detected_orientation:
+                    prev_detected_orientation = detected_orientation
+                    action_locked = True
+                    print(f"Detected Orientation: {detected_orientation}, Current C Orientation: {current_orientation}")
 
                     if detected_orientation == current_orientation:
                         count_correct += 1
                         total_c_created += 1
                         current_size = max(current_size - size_decrement, min_size)
                         current_orientation = random.choice(orientations)
+                        cv2.putText(frame, "Correct!", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    else:
+                        current_size = max(current_size - size_decrement, min_size)
+                        current_orientation = random.choice(orientations)
+                        total_c_created += 1
+                        cv2.putText(frame, "Wrong!", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
-            if pose_results.pose_landmarks:
-                mp_drawing.draw_landmarks(frame, pose_results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+            # Mở khóa khi không phát hiện tay
+            if detected_orientation is None:
+                action_locked = False
+                prev_detected_orientation = None
 
+            # Hiển thị điểm số
             cv2.putText(frame, f"Correct: {count_correct} / {total_c_created}", (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
@@ -123,26 +277,43 @@ def generate_frames():
                    b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
     cap.release()
-
-
-
-
 # **Khởi tạo MediaPipe Pose**
 yolo_pose = YOLO("yolov8n-pose.pt")  # Load mô hình YOLOv8 Pose
-MAX_SPINE_ANGLE = 70  # If > 70° → incorrect posture
+MAX_SPINE_ANGLE = 3
+MAX_HEAD_ANGLE = 10
+posture_data = {"status": "Analyzing...", "spine_angle": "--", "head_angle": "--", "confidence": "--"}
+def calculate_spine_angle(shoulder, hip):
+    """Tính góc giữa vector cột sống và trục thẳng đứng"""
+    spine_vector = np.array([hip[0] - shoulder[0], hip[1] - shoulder[1]])
+    vertical_vector = np.array([0, 1])
 
-# **Global variable to store posture state**
-posture_data = {"status": "Analyzing...", "spine_angle": "--", "confidence": "--"}
+    dot_product = np.dot(spine_vector, vertical_vector)
+    norm_spine = np.linalg.norm(spine_vector)
+    norm_vertical = np.linalg.norm(vertical_vector)
 
-def calculate_angle(point1, point2, point3):
-    """Calculate angle between three points"""
-    a = np.array(point1)
-    b = np.array(point2)
-    c = np.array(point3)
-    ba = a - b
-    bc = c - b
-    cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
-    angle = np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0)))
+    if norm_spine == 0:
+        return None
+
+    cos_theta = dot_product / (norm_spine * norm_vertical)
+    cos_theta = np.clip(cos_theta, -1.0, 1.0)
+    angle = np.degrees(np.arccos(cos_theta))
+    return angle
+
+def calculate_head_angle(eye, ear):
+    """Tính góc giữa vector mắt-tai và trục ngang"""
+    head_vector = np.array([ear[0] - eye[0], ear[1] - eye[1]])
+    horizontal_vector = np.array([1, 0])  # Trục ngang
+
+    dot_product = np.dot(head_vector, horizontal_vector)
+    norm_head = np.linalg.norm(head_vector)
+    norm_horizontal = np.linalg.norm(horizontal_vector)
+
+    if norm_head == 0:
+        return None
+
+    cos_theta = dot_product / (norm_head * norm_horizontal)
+    cos_theta = np.clip(cos_theta, -1.0, 1.0)
+    angle = np.degrees(np.arccos(cos_theta))
     return angle
 
 def get_point(keypoints, index):
@@ -161,7 +332,7 @@ def detect_posture(frame):
     if len(results) == 0 or results[0].keypoints is None:
         cv2.putText(frame, "No person detected", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-        posture_data = {"status": "Not detected", "spine_angle": "--", "confidence": "--"}
+        posture_data = {"status": "Not detected", "spine_angle": "--", "head_angle": "--", "confidence": "--"}
         output_data.append(posture_data)
         return frame, output_data
 
@@ -172,27 +343,46 @@ def detect_posture(frame):
 
         for i, (kps, box) in enumerate(zip(keypoints, boxes)):
             person_count += 1
-            if len(kps) < 13:
+            if len(kps) < 17:  # YOLOv8 Pose cần 17 keypoints
                 continue
 
+            # Lấy các điểm cho cột sống
             left_shoulder = get_point(kps, 5)
             right_shoulder = get_point(kps, 6)
             left_hip = get_point(kps, 11)
             right_hip = get_point(kps, 12)
 
-            if all([left_shoulder, right_shoulder, left_hip, right_hip]):
+            # Lấy các điểm cho đầu
+            left_eye = get_point(kps, 1)
+            left_ear = get_point(kps, 3)
+            right_eye = get_point(kps, 2)
+            right_ear = get_point(kps, 4)
+
+            if all([left_shoulder, right_shoulder, left_hip, right_hip]) and any([left_eye and left_ear, right_eye and right_ear]):
+                # Tính điểm giữa vai và hông
                 mid_shoulder = ((left_shoulder[0] + right_shoulder[0]) / 2,
                                 (left_shoulder[1] + right_shoulder[1]) / 2)
                 mid_hip = ((left_hip[0] + right_hip[0]) / 2,
                            (left_hip[1] + right_hip[1]) / 2)
 
-                vertical_point = (mid_shoulder[0], mid_shoulder[1] + 100)
-                spine_angle = calculate_angle(mid_shoulder, mid_hip, vertical_point)
+                # Tính góc cột sống
+                spine_angle = calculate_spine_angle(mid_shoulder, mid_hip)
 
-                if spine_angle is not None:
-                    status = "Correct" if spine_angle < MAX_SPINE_ANGLE else "Incorrect"
-                    color = (0, 255, 0) if spine_angle < MAX_SPINE_ANGLE else (0, 0, 255)
+                # Tính góc đầu (dùng bên trái hoặc bên phải tùy dữ liệu có sẵn)
+                head_angle = None
+                if left_eye and left_ear:
+                    head_angle = calculate_head_angle(left_eye, left_ear)
+                elif right_eye and right_ear:
+                    head_angle = calculate_head_angle(right_eye, right_ear)
 
+                if spine_angle is not None and head_angle is not None:
+                    # Tư thế đúng: cả góc cột sống và đầu đều trong ngưỡng
+                    is_spine_correct = spine_angle < MAX_SPINE_ANGLE
+                    is_head_correct = head_angle < MAX_HEAD_ANGLE
+                    status = "Correct" if is_spine_correct and is_head_correct else "Incorrect"
+                    color = (0, 255, 0) if status == "Correct" else (0, 0, 255)
+
+                    # Vẽ hộp và keypoints
                     x1, y1, x2, y2 = map(int, box)
                     cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
 
@@ -200,13 +390,15 @@ def detect_posture(frame):
                         if kp[0] > 0 and kp[1] > 0:
                             cv2.circle(frame, (int(kp[0]), int(kp[1])), 5, (255, 0, 0), -1)
 
-                    cv2.putText(frame, f"Person {person_count}: {status} ({spine_angle:.2f}°)",
+                    # Hiển thị thông tin
+                    cv2.putText(frame, f"Person {person_count}: {status} (Spine: {spine_angle:.2f}°, Head: {head_angle:.2f}°)",
                                 (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
                     confidence = float(result.boxes.conf[i].cpu().numpy()) * 100 if result.boxes.conf is not None else 100
                     posture_data = {
                         "status": status,
                         "spine_angle": round(spine_angle, 2),
+                        "head_angle": round(head_angle, 2),
                         "confidence": round(confidence, 2)
                     }
                     output_data.append(posture_data)
@@ -328,8 +520,8 @@ def process_video(video_path):
                             spine_angle = calculate_angle(mid_shoulder, mid_hip, left_hip)
 
                             # Đánh giá tư thế
-                            status_text = "✅ Đúng" if spine_angle < MAX_SPINE_ANGLE else "❌ Sai"
-                            color = (0, 255, 0) if spine_angle < MAX_SPINE_ANGLE else (0, 0, 255)
+                            status_text = "✅ Đúng" if spine_angle < 3 else "❌ Sai"
+                            color = (0, 255, 0) if spine_angle < 3 else (0, 0, 255)
 
                             cv2.putText(frame, f"{status_text} - {round(spine_angle, 2)}°",
                                         (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)

@@ -90,7 +90,7 @@
             <h5>Trạng thái tư thế</h5>
             <p><strong>Tư thế:</strong> <span id="posture-status">Đang phân tích...</span></p>
             <p><strong>Góc nghiêng:</strong> <span id="spine-angle">--</span>°</p>
-            <p><strong>Confidence:</strong> <span id="confidence-level">--%</span></p>
+            <p><strong>Độ chính xác:</strong> <span id="confidence-level">--%</span></p>
         </div>
     </div>
 
@@ -99,7 +99,7 @@
 </div>
 
 <script>
-   let correctTime = 0;  // Tổng thời gian ngồi đúng (giây)
+let correctTime = 0;  // Tổng thời gian ngồi đúng (giây)
 let incorrectTime = 0;  // Tổng thời gian ngồi sai (giây)
 
 // Khởi tạo biểu đồ thống kê tư thế
@@ -131,12 +131,16 @@ function updatePostureData() {
         .then(response => response.json())
         .then(data => {
             // Hiển thị thông tin lên UI
-            document.getElementById('posture-status').innerText = data.status;
+            if (data.status === "Correct") {
+                 document.getElementById('posture-status').innerText = "Ngồi đúng";
+            } else {
+                document.getElementById('posture-status').innerText = "Ngồi sai";
+            }
             document.getElementById('spine-angle').innerText = data.spine_angle + "°";
             document.getElementById('confidence-level').innerText = data.confidence + "%";
 
             // Tăng thời gian dựa trên tư thế
-            if (data.status.includes("Ngồi Đúng")) {
+            if (data.status.includes("Correct")) {
                 correctTime++;
             } else {
                 incorrectTime++;
